@@ -34,6 +34,9 @@ A Django-based web application for managing tasks with user roles and API integr
 - Python 3.9+
 
 ### Installation
+pip install -r requirements.txt
+Create env file for db setup
+Run python manage.py migrate
 create superuser 
 I have also shared the endpoints file, for postman
 
@@ -46,11 +49,12 @@ PATCH	/api/tasks/{id}/assign/	    Assign task to users
 GET	    /api/users/{id}/tasks/	        Get tasks for specific user
 GET	    /api/task-types/	            Get available task types
 GET	    /api/users/	                    Get all users
+POST    /api/register/                  Add user
 
 
 ## Steps 
 - Create a super user, using python manage.py createsuperuser
-- you can create more users from admin panel.
+- you can create more users from admin panel or create user api.
 - You can use apis through frontend or postman
 - You have to provide basic auth to create tasks.
 
