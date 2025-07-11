@@ -1,0 +1,415 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="dashboard-header">
+        <h2>{% if request.user.role == 'manager' %}All Tasks{% else %}Your Tasks{% endif %}</h2>
+        <button class="btn btn-primary" onclick="openCreateTaskModal()">Create New Task</button>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters">
+        <form id="filterForm" class="filter-form">
+            <div class="form-group">
+                <label>Status:
+                    <select name="status" id="statusFilter">
+                        <option value="">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Due Date:
+                    <input type="date" name="due_date" id="dueDateFilter">
+                </label>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="loadTasks()">Apply Filters</button>
+        </form>
+    </div>
+
+    <!-- Task List Container -->
+    <div id="taskListContainer"></div>
+</div>
+
+<!-- Create Task Modal -->
+<div id="createTaskModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeCreateTaskModal()">&times;</span>
+        <h3>Create New Task</h3>
+        <form id="taskForm" class="task-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="taskName">Task Name:</label>
+                <input type="text" id="taskName" required>
+                <div class="error-message" id="nameError"></div>
+            </div>
+            <div class="form-group">
+                <label for="taskDescription">Description:</label>
+                <textarea id="taskDescription" rows="3"></textarea>
+                <div class="error-message" id="descriptionError"></div>
+            </div>
+            <div class="form-group">
+                <label for="taskType">Task Type:</label>
+                <select id="taskType"></select>
+                <div class="error-message" id="typeError"></div>
+            </div>
+            <div class="form-group">
+                <label for="dueDate">Due Date:</label>
+                <input type="date" id="dueDate">
+                <div class="error-message" id="dueDateError"></div>
+            </div>
+            <div class="form-group">
+                <label>Assign To:</label>
+                <div class="user-search">
+                    <input type="text" id="userSearch" placeholder="Search users..." onkeyup="searchUsers(this.value)">
+                    <div id="userList" class="user-list"></div>
+                </div>
+                <div id="selectedUsers" class="selected-users"></div>
+                <div class="error-message" id="assigneeError"></div>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="submitTaskForm()">Create Task</button>
+        </form>
+    </div>
+</div>
+
+<!-- Edit Task Modal -->
+<div id="editTaskModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeEditTaskModal()">&times;</span>
+        <h3>Edit Task</h3>
+        <form id="editTaskForm" class="task-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="editStatus">Status:</label>
+                <select id="editStatus">
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                </select>
+                <div class="error-message" id="editStatusError"></div>
+            </div>
+            <div class="form-group">
+                <label>Assign To:</label>
+                <div class="user-search">
+                    <input type="text" id="editUserSearch" placeholder="Search users..." onkeyup="searchEditUsers(this.value)">
+                    <div id="editUserList" class="user-list"></div>
+                </div>
+                <div id="editSelectedUsers" class="selected-users"></div>
+                <div class="error-message" id="editAssigneeError"></div>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="submitEditTaskForm()">Save Changes</button>
+        </form>
+    </div>
+</div>
+
+<script>
+// Global variables
+let selectedUsers = [];
+let allUsers = [];
+let taskTypes = [];
+let editingTask = null;
+let editSelectedUsers = [];
+
+// Load tasks on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadTasks();
+    loadTaskTypes();
+    loadAllUsers();
+});
+
+// Updated renderTasks function with an extra Action column
+function renderTasks(tasks) {
+    const container = document.getElementById('taskListContainer');
+    let html = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Task Name</th>
+                    <th>Description</th>
+                    <th>Status</th>
+                    <th>Due Date</th>
+                    <th>Assigned To</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    tasks.forEach(task => {
+        html += `
+            <tr>
+                <td>${task.name}</td>
+                <td>${task.description.substring(0, 50)}</td>
+                <td><span class="status-badge">${task.status}</span></td>
+                <td>${new Date(task.due_date).toLocaleString()}</td>
+                <td>${task.assigned_to.map(u => u.username).join(', ')}</td>
+                <td>
+                    <button class="btn btn-secondary" onclick='openEditTaskModal(${JSON.stringify(task)})'>Edit</button>
+                </td>
+            </tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+async function loadTasks() {
+    const status = document.getElementById('statusFilter').value;
+    const dueDate = document.getElementById('dueDateFilter').value;
+    
+    try {
+        const response = await fetch(`/api/tasks/?status=${status}&due_date=${dueDate}`);
+        const data = await response.json();
+        renderTasks(data.tasks);
+    } catch (error) {
+        console.error('Error loading tasks:', error);
+    }
+}
+
+// Modal functions for Create Task
+function openCreateTaskModal() {
+    document.getElementById('createTaskModal').style.display = 'block';
+}
+function closeCreateTaskModal() {
+    document.getElementById('createTaskModal').style.display = 'none';
+    resetForm();
+}
+
+// Modal functions for Edit Task
+function openEditTaskModal(task) {
+    editingTask = task;
+    editSelectedUsers = [...task.assigned_to]; // Pre-populate assignees
+
+    // Set status dropdown to current status
+    document.getElementById('editStatus').value = task.status;
+
+    updateEditSelectedUsersDisplay();
+    document.getElementById('editTaskModal').style.display = 'block';
+}
+
+function closeEditTaskModal() {
+    document.getElementById('editTaskModal').style.display = 'none';
+    editingTask = null;
+    editSelectedUsers = [];
+    updateEditSelectedUsersDisplay();
+    clearEditErrors();
+}
+
+// Form handling for Create Task
+async function submitTaskForm() {
+    const taskData = {
+        name: document.getElementById('taskName').value,
+        description: document.getElementById('taskDescription').value,
+        task_type: document.getElementById('taskType').value,
+        due_date: document.getElementById('dueDate').value,
+        assigned_to: selectedUsers.map(u => u.id)
+    };
+
+    try {
+        const response = await fetch('/api/tasks/add', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: JSON.stringify(taskData)
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+            closeCreateTaskModal();
+            loadTasks();
+        } else {
+            handleFormErrors(data.errors);
+        }
+    } catch (error) {
+        console.error('Error creating task:', error);
+    }
+}
+
+// Form handling for Edit Task (updates assignees and status)
+async function submitEditTaskForm() {
+    if (!editingTask) return;
+    const taskId = editingTask.id;
+    const newStatus = document.getElementById('editStatus').value;
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    try {
+        // Update assignees via provided API endpoint (send field "user_ids")
+        const assignResponse = await fetch(`/api/tasks/${taskId}/assign/`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ user_ids: editSelectedUsers.map(u => u.id) })
+        });
+        const assignData = await assignResponse.json();
+
+        // Update status using a new API endpoint
+        const statusResponse = await fetch(`/api/tasks/${taskId}/update-status/`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ status: newStatus })
+        });
+        const statusData = await statusResponse.json();
+
+        if (assignResponse.ok && statusResponse.ok) {
+            closeEditTaskModal();
+            loadTasks();
+        } else {
+            const errors = {};
+            if (!assignResponse.ok && assignData.errors) {
+                errors.user_ids = assignData.errors.user_ids;
+            }
+            if (!statusResponse.ok && statusData.errors) {
+                errors.status = statusData.errors.status;
+            }
+            handleEditFormErrors(errors);
+        }
+    } catch (error) {
+        console.error('Error updating task:', error);
+    }
+}
+
+// User search and selection for Create Modal
+function searchUsers(query) {
+    const filtered = allUsers.filter(user => 
+        user.username.toLowerCase().includes(query.toLowerCase())
+    );
+    
+    const userList = document.getElementById('userList');
+    userList.innerHTML = filtered.map(user => `
+        <div class="user-item" onclick="toggleUserSelection(${user.id})">
+            ${user.username}
+        </div>
+    `).join('');
+}
+
+function toggleUserSelection(userId) {
+    const user = allUsers.find(u => u.id === userId); 
+    if (!user) return; // Safety check
+
+    const index = selectedUsers.findIndex(u => u.id === userId);
+    if (index === -1) {
+        selectedUsers.push(user);
+    } else {
+        selectedUsers.splice(index, 1);
+    }
+    updateSelectedUsersDisplay();
+}
+
+function updateSelectedUsersDisplay() {
+    const container = document.getElementById('selectedUsers');
+    container.innerHTML = selectedUsers.map(user => `
+        <span class="selected-user">
+            ${user.username}
+            <button onclick="toggleUserSelection(${user.id})">&times;</button>
+        </span>
+    `).join('');
+}
+
+// User search and selection for Edit Modal
+function searchEditUsers(query) {
+    const filtered = allUsers.filter(user => 
+        user.username.toLowerCase().includes(query.toLowerCase())
+    );
+    
+    const userList = document.getElementById('editUserList');
+    userList.innerHTML = filtered.map(user => `
+        <div class="user-item" onclick="toggleEditUserSelection(${user.id})">
+            ${user.username}
+        </div>
+    `).join('');
+}
+
+function toggleEditUserSelection(userId) {
+    const user = allUsers.find(u => u.id === userId); 
+    if (!user) return;
+
+    const index = editSelectedUsers.findIndex(u => u.id === userId);
+    if (index === -1) {
+        editSelectedUsers.push(user);
+    } else {
+        editSelectedUsers.splice(index, 1);
+    }
+    updateEditSelectedUsersDisplay();
+}
+
+function updateEditSelectedUsersDisplay() {
+    const container = document.getElementById('editSelectedUsers');
+    container.innerHTML = editSelectedUsers.map(user => `
+        <span class="selected-user">
+            ${user.username}
+            <button onclick="toggleEditUserSelection(${user.id})">&times;</button>
+        </span>
+    `).join('');
+}
+
+// Utility functions
+async function loadTaskTypes() {
+    const response = await fetch('/api/task-types/');
+    taskTypes = await response.json();
+    const select = document.getElementById('taskType');
+    select.innerHTML = taskTypes.task_types.map(tt => 
+        `<option value="${tt.id}">${tt.name}</option>`
+    ).join('');
+}
+
+async function loadAllUsers() {
+    try {
+        const response = await fetch('/api/users/');
+        const data = await response.json();
+        allUsers = data.data; // Store only the array of users
+    } catch (error) {
+        console.error("Error loading users:", error);
+    }
+}
+
+function resetForm() {
+    document.getElementById('taskForm').reset();
+    selectedUsers = [];
+    updateSelectedUsersDisplay();
+    clearErrors();
+}
+
+function handleFormErrors(errors) {
+    clearErrors();
+    for (const [field, messages] of Object.entries(errors)) {
+        const errorElement = document.getElementById(`${field}Error`);
+        if (errorElement) {
+            errorElement.textContent = messages.join(', ');
+        }
+    }
+}
+
+function clearErrors() {
+    document.querySelectorAll('.error-message').forEach(el => {
+        el.textContent = '';
+    });
+}
+
+function handleEditFormErrors(errors) {
+    clearEditErrors();
+    for (const [field, messages] of Object.entries(errors)) {
+        const errorElement = document.getElementById(`edit${field.charAt(0).toUpperCase() + field.slice(1)}Error`);
+        if (errorElement) {
+            errorElement.textContent = messages.join(', ');
+        }
+    }
+}
+
+function clearEditErrors() {
+    document.querySelectorAll('#editTaskModal .error-message').forEach(el => {
+        el.textContent = '';
+    });
+}
+</script>
+{% endblock %}

@@ -50,13 +50,6 @@ GET	    /api/users/	                    Get all users
 
 ## Steps 
 - Create a super user, using python manage.py createsuperuser
-- you can create more users from admin panel.
+- you cna create more users from admin panel.
 - You can use apis through frontend or postman
 - You have to provide basic auth to create tasks.
-
-## env file
-DB_NAME
-DB_USER
-DB_PASSWORD
-DB_HOST='localhost'
-DB_PORT='5432'
